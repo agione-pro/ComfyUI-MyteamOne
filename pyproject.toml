@@ -1,0 +1,24 @@
+[project]
+name = "comfyui-myteamone"
+description = "MyteamOne nodes for ComfyUI — reliable Seedance 2.0 video generation with no queue, on-demand model supply."
+version = "0.1.0"
+license = { file = "LICENSE" }
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["requests>=2.31.0"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Repository    = "https://github.com/YOUR_GH_USER/ComfyUI-MyteamOne"
+Documentation = "https://github.com/YOUR_GH_USER/ComfyUI-MyteamOne#readme"
+"Bug Tracker" = "https://github.com/YOUR_GH_USER/ComfyUI-MyteamOne/issues"
+
+[tool.comfy]
+PublisherId = "YOUR_PUBLISHER_ID"
+DisplayName = "MyteamOne"
+Icon        = "https://YOUR_GH_USER.github.io/ComfyUI-MyteamOne/icon.png"
+Tags        = ["VideoGeneration", "API", "Seedance", "ByteDance"]

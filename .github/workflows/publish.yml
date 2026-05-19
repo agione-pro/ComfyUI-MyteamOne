@@ -1,0 +1,23 @@
+name: Publish to ComfyUI Registry
+
+# Auto-publishes whenever pyproject.toml's version is bumped on main,
+# or you can trigger manually from the Actions tab.
+on:
+  push:
+    branches: [main]
+    paths: ["pyproject.toml"]
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish to ComfyUI Registry
+        uses: Comfy-Org/publish-node-action@v1
+        with:
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
