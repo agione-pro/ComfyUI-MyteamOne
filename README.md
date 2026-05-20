@@ -27,7 +27,7 @@ No queue. No throttling. Cinema-quality video directly inside your workflow.
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/YOUR_GH_USER/ComfyUI-MyteamOne
+git clone https://github.com/agione-pro/ComfyUI-MyteamOne
 cd ComfyUI-MyteamOne
 pip install -r requirements.txt
 ```

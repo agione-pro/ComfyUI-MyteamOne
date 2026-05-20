@@ -13,12 +13,12 @@ classifiers = [
 ]
 
 [project.urls]
-Repository    = "https://github.com/YOUR_GH_USER/ComfyUI-MyteamOne"
-Documentation = "https://github.com/YOUR_GH_USER/ComfyUI-MyteamOne#readme"
-"Bug Tracker" = "https://github.com/YOUR_GH_USER/ComfyUI-MyteamOne/issues"
+Repository    = "https://github.com/agione-pro/ComfyUI-MyteamOne"
+Documentation = "https://github.com/agione-pro/ComfyUI-MyteamOne#readme"
+"Bug Tracker" = "https://github.com/agione-pro/ComfyUI-MyteamOne/issues"
 
 [tool.comfy]
-PublisherId = "YOUR_PUBLISHER_ID"
+PublisherId = "myteamone"
 DisplayName = "MyteamOne"
-Icon        = "https://YOUR_GH_USER.github.io/ComfyUI-MyteamOne/icon.png"
+Icon        = "https://raw.githubusercontent.com/agione-pro/ComfyUI-MyteamOne/main/icon.png"
 Tags        = ["VideoGeneration", "API", "Seedance", "ByteDance"]
