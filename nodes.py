@@ -3,7 +3,6 @@ ComfyUI nodes for MyteamOne Seedance 2.0.
 """
 
 import os
-import folder_paths
 
 from .api_client import MyteamOneClient
 
@@ -101,6 +100,7 @@ class MyteamOneSeedance20T2V:
         if not video_url:
             raise RuntimeError(f"No video URL in success response: {result}")
 
+        import folder_paths
         output_dir = folder_paths.get_output_directory()
         os.makedirs(output_dir, exist_ok=True)
         filename = f"myteamone_seedance_{task_id}.mp4"
