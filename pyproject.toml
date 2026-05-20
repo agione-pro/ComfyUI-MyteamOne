@@ -22,3 +22,4 @@ PublisherId = "myteamone"
 DisplayName = "MyteamOne"
 Icon        = "https://raw.githubusercontent.com/agione-pro/ComfyUI-MyteamOne/main/icon.png"
 Tags        = ["VideoGeneration", "API", "Seedance", "ByteDance"]
+SupportedComfyUIVersion = ">=1.0.0"
