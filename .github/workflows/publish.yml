@@ -1,20 +1,81 @@
 name: Publish to ComfyUI Registry
 
-# Publishes when a tag is pushed, version is read from pyproject.toml.
-# Also supports manual trigger from the Actions tab.
 on:
   push:
-    tags: ["*"]
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
-  issues: write
+  contents: write
 
 jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.version.outputs.NEW_TAG }}
+      new_version: ${{ steps.version.outputs.NEW_VERSION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bump version and create tag
+        id: version
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Get latest tag, default to 0.0.0 if none
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          echo "Latest tag: $latest_tag"
+
+          # Parse version numbers
+          IFS='.' read -r major minor patch <<< "$latest_tag"
+          major=${major#v}
+          minor=${minor:-0}
+          patch=${patch:-0}
+
+          # Increment based on bump type
+          case "${{ github.event.inputs.bump || 'patch' }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+
+          new_version="${major}.${minor}.${patch}"
+          new_tag="v${new_version}"
+          echo "NEW_VERSION=${new_version}" >> $GITHUB_OUTPUT
+          echo "NEW_TAG=${new_tag}" >> $GITHUB_OUTPUT
+
+          echo "Bumping $latest_tag -> $new_tag"
+
+      - name: Update pyproject.toml version
+        run: |
+          sed -i 's/^version = ".*"/version = "'"${{ steps.version.outputs.new_version }}"'"/' pyproject.toml
+          cat pyproject.toml | grep "^version"
+
+      - name: Commit and push new tag
+        run: |
+          git add pyproject.toml
+          git commit -m "release: ${{ steps.version.outputs.NEW_TAG }}"
+          git tag ${{ steps.version.outputs.NEW_TAG }}
+          git push origin main --tags
+
   publish:
+    needs: bump-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.NEW_TAG }}
 
       - name: Publish to ComfyUI Registry
         uses: Comfy-Org/publish-node-action@v1
