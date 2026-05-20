@@ -1,11 +1,10 @@
 name: Publish to ComfyUI Registry
 
-# Auto-publishes whenever pyproject.toml's version is bumped on main,
-# or you can trigger manually from the Actions tab.
+# Publishes when a tag is pushed, version is read from pyproject.toml.
+# Also supports manual trigger from the Actions tab.
 on:
   push:
-    branches: [main]
-    paths: ["pyproject.toml"]
+    tags: ["*"]
   workflow_dispatch:
 
 permissions:
