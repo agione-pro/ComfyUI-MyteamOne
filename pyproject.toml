@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-myteamone"
 description = "MyteamOne nodes for ComfyUI — reliable Seedance 2.0 video generation with no queue, on-demand model supply."
-version = "0.0.1"
+version = "0.1.3"
 license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.10"

@@ -2,92 +2,17 @@ name: Publish to ComfyUI Registry
 
 on:
   push:
-    branches: [main]
+    tags: ["*"]
   workflow_dispatch:
-    inputs:
-      bump:
-        description: "Version bump type"
-        required: true
-        default: "patch"
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  bump-version:
-    runs-on: ubuntu-latest
-    outputs:
-      new_tag: ${{ steps.version.outputs.NEW_TAG }}
-      new_version: ${{ steps.version.outputs.NEW_VERSION }}
-      should_publish: ${{ steps.check.outputs.SHOULD_PUBLISH }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check if bump needed
-        id: check
-        run: |
-          # Check if HEAD commit is from this workflow (avoid re-trigger loops)
-          author=$(git log -1 --format='%ae')
-          echo "Last commit author: $author"
-          if [ "$author" = "github-actions[bot]@users.noreply.github.com" ]; then
-            echo "Last commit was from this workflow, skipping."
-            echo "SHOULD_PUBLISH=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          echo "SHOULD_PUBLISH=true" >> $GITHUB_OUTPUT
-
-      - name: Bump version and create tag
-        if: steps.check.outputs.SHOULD_PUBLISH == 'true'
-        id: version
-        run: |
-          git config --local user.name "github-actions[bot]"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-
-          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
-          echo "Latest tag: $latest_tag"
-
-          IFS='.' read -r major minor patch <<< "${latest_tag#v}"
-          major=${major:-0}; minor=${minor:-0}; patch=${patch:-0}
-
-          case "${{ github.event.inputs.bump || 'patch' }}" in
-            major) major=$((major + 1)); minor=0; patch=0 ;;
-            minor) minor=$((minor + 1)); patch=0 ;;
-            patch) patch=$((patch + 1)) ;;
-          esac
-
-          new_version="${major}.${minor}.${patch}"
-          new_tag="v${new_version}"
-          echo "NEW_VERSION=${new_version}" >> $GITHUB_OUTPUT
-          echo "NEW_TAG=${new_tag}" >> $GITHUB_OUTPUT
-          echo "Bumping $latest_tag -> $new_tag"
-
-      - name: Update pyproject.toml version
-        if: steps.check.outputs.SHOULD_PUBLISH == 'true'
-        run: |
-          sed -i 's/^version = ".*"/version = "'"${{ steps.version.outputs.new_version }}"'"/' pyproject.toml
-          cat pyproject.toml | grep "^version"
-
-      - name: Commit and push new tag
-        if: steps.check.outputs.SHOULD_PUBLISH == 'true'
-        run: |
-          git add pyproject.toml
-          git commit -m "release: ${{ steps.version.outputs.NEW_TAG }}"
-          git tag ${{ steps.version.outputs.NEW_TAG }}
-          git push origin main --tags
-
   publish:
-    needs: bump-version
-    if: needs.bump-version.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.bump-version.outputs.NEW_TAG }}
 
       - name: Publish to ComfyUI Registry
         uses: Comfy-Org/publish-node-action@v1
