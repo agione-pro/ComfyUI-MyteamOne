@@ -1,170 +1,167 @@
 """
-MyteamOne API client.
+MyteamOne API client — submit a video generation task, poll for completion,
+download the result.
 
-Endpoints (all configurable from the ComfyUI client node):
-  POST  {base_url}{create_path}
-  GET   {poll_path}        # may be a full URL with {task_id} / {taskid} placeholder
+Endpoints (third-party reseller of ByteDance Seedance):
+  Create: POST {base_url}{create_path}
+  Poll:   GET  {poll_path}, with {taskid}/{task_id} substituted in
+
+Defensive response parsing — the backend has shipped slightly different
+shapes over time. Both these forms are supported:
+
+  Create response:
+    {"requestId": "...", "data": [{"taskId": "cgt-..."}]}
+    {"taskId": "cgt-..."}
+
+  Poll response (in-progress):
+    {"result": {"data": [], "message": "Task queued!"}, "status": 200, ...}
+
+  Poll response (finished):
+    {"result": {"data": [{"url": "https://...mp4"}], "message": "Task executed successfully"}, ...}
+
+Notes
+-----
+* The create endpoint is slow — even small payloads can take 60–180 seconds
+  before returning a task id. The read timeout is set generously.
+* On Windows, asyncio sometimes logs `ConnectionResetError [WinError 10054]`
+  during connection teardown *after* a successful response. Harmless; ignore.
 """
 
-import re
+import json
+import os
 import time
+
 import requests
 
 
-def _unwrap(data):
-    """Single-level unwrap of {"data": {...}} or single-item list envelopes."""
-    if isinstance(data, list):
-        if not data:
-            return {}
-        return _unwrap(data[0])
-    if isinstance(data, dict):
-        inner = data.get("data")
-        if isinstance(inner, (dict, list)):
-            return _unwrap(inner)
-        return data
-    return {}
-
-
-def _first(data: dict, *keys):
-    for k in keys:
-        v = data.get(k)
-        if v:
-            return v
-    return None
-
-
-# Case-insensitive {task_id} / {taskid} / {taskId} substitution.
-_TASK_ID_RE = re.compile(r"\{task[_-]?id\}", re.IGNORECASE)
-
-
 class MyteamOneClient:
-    def __init__(
-        self,
-        api_key: str,
-        base_url: str = "https://zh.agione.co/hyperone/xapi/api/v1",
-        create_path: str = "/videos",
-        poll_path_template: str = "https://agione.cc/hyperone/xapi/api/videos/generations/task/{taskid}",
-        timeout: float = 30.0,
-    ):
-        self.api_key = api_key
-        self.base_url = base_url.rstrip("/")
-        self.create_path = "/" + create_path.strip("/")
-        self.poll_path_template = poll_path_template.strip()
-        self.timeout = timeout
+    def __init__(self, api_key, base_url, create_path, poll_path):
+        self.api_key     = api_key
+        self.base_url    = base_url.rstrip("/")
+        self.create_path = create_path if create_path.startswith("/") else "/" + create_path
+        self.poll_path   = poll_path  # full URL template; {taskid} or {task_id} placeholder
 
         self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }
+        self.session.headers.update({
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type":  "application/json",
+        })
+
+    # ------------------------------------------------------------------ create
+
+    def create_task(self, payload):
+        """Submit a generation task. Returns the task_id (string)."""
+        url  = self.base_url + self.create_path
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+        print(f"[MyteamOne] POST {url}")
+        print(f"[MyteamOne] payload ~{len(body) // 1024} KB")
+
+        resp = self.session.post(
+            url,
+            data=body,
+            timeout=(30, 300),  # (connect, read) — create endpoint is slow
         )
 
-    # ---------- task lifecycle ----------
+        # Always log the raw response — it's the most useful debugging info
+        # when the request fails.
+        try:
+            raw_text = resp.text
+        except Exception:
+            raw_text = "<could not read response body>"
+        print(f"[MyteamOne] create raw response (status={resp.status_code}): {raw_text}")
 
-    def create_task(self, payload: dict) -> str:
-        url = self.base_url + self.create_path
-        print(f"[MyteamOne] POST {url}")
-        print(f"[MyteamOne] payload={payload}")
-
-        resp = self.session.post(url, json=payload, timeout=self.timeout)
-        print(f"[MyteamOne] create raw response (status={resp.status_code}): {resp.text}")
         resp.raise_for_status()
 
-        data = _unwrap(resp.json())
-        task_id = _first(
-            data,
-            "taskId", "task_id", "id",
-            "videoId", "video_id",
-            "jobId", "job_id",
-        )
+        data = resp.json()
+        task_id = self._extract_task_id(data)
         if not task_id:
-            raise RuntimeError(f"No task id in response (after unwrap): {data}")
+            raise RuntimeError(f"Could not find task_id in response: {data}")
         print(f"[MyteamOne] task_id={task_id}")
         return task_id
 
-    def _build_poll_url(self, task_id: str) -> str:
-        template = self.poll_path_template
-        # If the template doesn't include a placeholder, append /{task_id}
-        if not _TASK_ID_RE.search(template):
-            template = template.rstrip("/") + "/{task_id}"
-        # Substitute placeholder (case-insensitive)
-        path = _TASK_ID_RE.sub(task_id, template)
-        # Full URL? Use as is. Otherwise prepend base_url.
-        if path.startswith("http://") or path.startswith("https://"):
-            return path
-        if not path.startswith("/"):
-            path = "/" + path
-        return self.base_url + path
+    @staticmethod
+    def _extract_task_id(data):
+        """Find a task id in a few likely shapes."""
+        if not isinstance(data, dict):
+            return None
+        d = data.get("data")
+        if isinstance(d, list) and d and isinstance(d[0], dict):
+            for key in ("taskId", "task_id", "id"):
+                if key in d[0]:
+                    return d[0][key]
+        for key in ("taskId", "task_id", "id"):
+            if key in data:
+                return data[key]
+        return None
 
-    def poll_task(self, task_id: str, interval: float = 5.0, max_wait: float = 1800.0) -> dict:
-        url = self._build_poll_url(task_id)
+    # -------------------------------------------------------------------- poll
+
+    def poll_task(self, task_id, interval=5, max_wait=900):
+        """Poll until success. Returns a dict {'video_url', 'message', 'raw'}."""
+        url = self.poll_path.replace("{taskid}", task_id).replace("{task_id}", task_id)
         print(f"[MyteamOne] poll URL: {url}")
 
-        started = time.time()
-        first_dump = True
+        start = time.time()
+        first = True
         while True:
-            resp = self.session.get(url, timeout=self.timeout)
-            if resp.status_code >= 400:
-                print(f"[MyteamOne] poll {resp.status_code} body: {resp.text}")
-            resp.raise_for_status()
-            raw = resp.json()
-
-            if first_dump:
-                print(f"[MyteamOne] first poll body: {raw}")
-                first_dump = False
-
-            # ---- Extract video URL from MyteamOne's nested structure ----
-            # Successful response shape:
-            # {
-            #   "result": {
-            #     "data": [ { "url": "..." } ],
-            #     "message": "Task executed successfully"
-            #   },
-            #   "status": 200,
-            #   ...
-            # }
-            video_url = None
-            result_obj = (raw.get("result") if isinstance(raw, dict) else None) or {}
-            data_list = result_obj.get("data") or []
-            if isinstance(data_list, list) and data_list:
-                first_item = data_list[0] or {}
-                if isinstance(first_item, dict):
-                    video_url = (
-                        first_item.get("url")
-                        or first_item.get("video_url")
-                        or first_item.get("videoUrl")
-                    )
-
-            # Fallbacks for other possible shapes
-            if not video_url and isinstance(raw, dict):
-                video_url = (
-                    raw.get("url")
-                    or raw.get("video_url")
-                    or raw.get("videoUrl")
+            elapsed = int(time.time() - start)
+            if elapsed > max_wait:
+                raise TimeoutError(
+                    f"task {task_id} did not finish within {max_wait}s "
+                    f"(last check at {elapsed}s)"
                 )
 
+            try:
+                resp = self.session.get(url, timeout=(30, 60))
+                resp.raise_for_status()
+                body = resp.json()
+            except requests.exceptions.RequestException as e:
+                print(f"[MyteamOne] poll error (will retry): {e}")
+                time.sleep(interval)
+                continue
+
+            if first:
+                print(f"[MyteamOne] first poll body: {body}")
+                first = False
+
+            result = body.get("result") if isinstance(body, dict) else None
+            if not isinstance(result, dict):
+                result = body if isinstance(body, dict) else {}
+
+            video_url = self._first_video_url(result)
+            message   = result.get("message", "")
+
             if video_url:
-                print(f"[MyteamOne] succeeded → {video_url}")
-                return {"video_url": video_url, "raw": raw}
+                print(f"[MyteamOne] succeeded -> {video_url}")
+                return {"video_url": video_url, "message": message, "raw": body}
 
-            # Check for explicit failure indicators
-            message = (result_obj.get("message") or "").lower()
-            if any(kw in message for kw in ("fail", "error", "denied", "rejected")):
-                raise RuntimeError(f"Task failed: {raw}")
-
-            elapsed = int(time.time() - started)
-            print(f"[MyteamOne] task={task_id} pending... elapsed={elapsed}s  msg={result_obj.get('message')!r}")
-
-            if time.time() - started > max_wait:
-                raise TimeoutError(f"Task {task_id} exceeded {max_wait}s")
+            print(f"[MyteamOne] task={task_id} pending... elapsed={elapsed}s  msg='{message}'")
             time.sleep(interval)
 
-    def download_video(self, url: str, output_path: str) -> str:
-        with self.session.get(url, stream=True, timeout=300) as resp:
-            resp.raise_for_status()
-            with open(output_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+    @staticmethod
+    def _first_video_url(result_dict):
+        if not isinstance(result_dict, dict):
+            return None
+        d = result_dict.get("data")
+        if isinstance(d, list) and d and isinstance(d[0], dict):
+            for key in ("url", "video_url", "videoUrl"):
+                if key in d[0]:
+                    return d[0][key]
+        for key in ("url", "video_url", "videoUrl"):
+            if key in result_dict:
+                return result_dict[key]
+        return None
+
+    # ---------------------------------------------------------------- download
+
+    def download_video(self, video_url, dst_path, timeout=600):
+        """Stream-download the finished video to disk."""
+        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+        with self.session.get(video_url, stream=True, timeout=(30, timeout)) as r:
+            r.raise_for_status()
+            with open(dst_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=256 * 1024):
                     if chunk:
                         f.write(chunk)
-        return output_path
+        return dst_path
